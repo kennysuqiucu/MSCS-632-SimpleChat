@@ -68,12 +68,39 @@ pub fn filter_by_user(conn: &Connection, user_id: &str) -> Result<Vec<Message>> 
     rows
 }
 
-/// Returns only the messages that contain the keyword (any letter case).
+/// Returns only the messages that contain the keyword as a whole word
+/// (any letter case). Searching for "is" finds "freeze is tonight" but not
+/// "finished" or "this".
+///
+/// It works in two steps. The SQL `LIKE` picks every message that contains
+/// the letters anywhere, and then `has_word` keeps only the messages where
+/// those letters are a word on their own.
 pub fn search_by_keyword(conn: &Connection, keyword: &str) -> Result<Vec<Message>> {
-    let pattern = format!("%{}%", keyword.to_lowercase());
+    let keyword = keyword.to_lowercase();
+    let pattern = format!("%{}%", keyword);
     let mut stmt = conn.prepare(
         "SELECT user_id, message, sent_at FROM messages WHERE LOWER(message) LIKE ?1 ORDER BY id",
     )?;
-    let rows = stmt.query_map(params![pattern], row_to_message)?.collect();
-    rows
+    let candidates: Result<Vec<Message>> = stmt.query_map(params![pattern], row_to_message)?.collect();
+
+    let mut matches = Vec::new();
+    for message in candidates? {
+        if has_word(&message.message, &keyword) {
+            matches.push(message);
+        }
+    }
+    Ok(matches)
+}
+
+/// True when one of the words in `text` is exactly `keyword`.
+/// The text is split wherever a character is not a letter, a digit or an
+/// apostrophe, so "tonight?" is read as the word "tonight".
+fn has_word(text: &str, keyword: &str) -> bool {
+    let text = text.to_lowercase();
+    for word in text.split(|c: char| !c.is_alphanumeric() && c != '\'') {
+        if word == keyword {
+            return true;
+        }
+    }
+    false
 }
