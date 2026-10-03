@@ -1,18 +1,24 @@
 // Command gochat is a small text-based chat room. Three simulated users
-// (alice, bob and carol) send messages at the same time; every message is
-// saved to a SQLite database, which can then be filtered by user or searched
-// by keyword.
+// (alice, bob and carol) send the messages listed in a text file at the same
+// time; every message is saved to a SQLite database, which can then be
+// filtered by user or searched by keyword from a simple command loop.
 //
-// This first version contains the Message struct and the database functions.
-// The temporary main below exercises them; it is replaced when the goroutines
-// and command loop are added.
+//	go run .                     # read ../messages.txt, fresh database (chat.db)
+//	go run . -file other.txt     # read a different conversation file
+//	go run . -keep               # keep messages from earlier runs
+//	go run . -db other.db        # use a different database file
 package main
 
 import (
+	"bufio"
 	"database/sql"
+	"flag"
 	"fmt"
+	"math/rand/v2"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, registers itself as "sqlite"
@@ -137,42 +143,194 @@ func queryMessages(db *sql.DB, query string, args ...any) ([]Message, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Temporary main: checks the database functions until message handling exists.
+// Message handling
+
+var users = []string{"alice", "bob", "carol"}
+
+// simulateUser runs in its own goroutine and sends each of the user's lines
+// into the channel, pausing briefly between messages. Because all users run
+// at once, their messages interleave differently on every run.
+func simulateUser(userID string, lines []string, out chan<- Message, pending *sync.WaitGroup) {
+	for _, line := range lines {
+		time.Sleep(time.Duration(rand.IntN(50)) * time.Millisecond)
+		send(out, pending, userID, line)
+	}
+}
+
+// send stamps a message with the current time and puts it on the channel.
+// pending is marked done by the saver once the message is in the database.
+func send(out chan<- Message, pending *sync.WaitGroup, userID, text string) {
+	pending.Add(1)
+	out <- Message{UserID: userID, Text: text, SentAt: time.Now()}
+}
+
+// saveLoop is the only goroutine that writes to the database. It receives
+// messages until the channel is closed, then closes done.
+func saveLoop(db *sql.DB, in <-chan Message, pending *sync.WaitGroup, done chan<- struct{}) {
+	defer close(done)
+	for m := range in {
+		id, err := saveMessage(db, m)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  error: message from %s not saved: %v\n", m.UserID, err)
+		} else {
+			m.ID = id
+			fmt.Println("  saved", m)
+		}
+		pending.Done()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Main program
+
+const help = `commands:
+  history              show every message
+  user <name>          show only messages from alice, bob or carol
+  search <word>        show only messages containing a word
+  send <name> <text>   send a new message as alice, bob or carol
+  help                 show this list
+  quit                 exit`
+
+// loadConversation reads a conversation file with one "user: message" per
+// line and returns each user's lines in file order. Empty lines and lines
+// starting with # are skipped. "bob:" with no text is kept as an empty message.
+func loadConversation(path string) (map[string][]string, int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open conversation file: %w", err)
+	}
+	defer f.Close()
+
+	lines := map[string][]string{}
+	count, lineNo := 0, 0
+	in := bufio.NewScanner(f)
+	for in.Scan() {
+		lineNo++
+		line := strings.TrimSpace(in.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		user, text, ok := strings.Cut(line, ":") // only the first ":" separates
+		user = strings.TrimSpace(user)
+		if !ok {
+			return nil, 0, fmt.Errorf("%s line %d: expected \"user: message\", got %q", path, lineNo, line)
+		}
+		if !slices.Contains(users, user) {
+			return nil, 0, fmt.Errorf("%s line %d: unknown user %q (use alice, bob or carol)", path, lineNo, user)
+		}
+		lines[user] = append(lines[user], strings.TrimSpace(text))
+		count++
+	}
+	if err := in.Err(); err != nil {
+		return nil, 0, fmt.Errorf("read %s: %w", path, err)
+	}
+	return lines, count, nil
+}
 
 func main() {
-	db, err := openDB("chat.db", true)
+	dbPath := flag.String("db", "chat.db", "SQLite database file")
+	file := flag.String("file", "../messages.txt", "conversation file, one \"user: message\" per line")
+	keep := flag.Bool("keep", false, "keep messages from earlier runs")
+	flag.Parse()
+
+	conversation, count, err := loadConversation(*file)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+
+	db, err := openDB(*dbPath, !*keep)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
-	for _, m := range []Message{
-		{UserID: "alice", Text: "Anyone up for lunch today?"},
-		{UserID: "bob", Text: "Lunch sounds good to me"},
-		{UserID: "carol", Text: "Who is reviewing my pull request?"},
-	} {
-		m.SentAt = time.Now()
-		if _, err := saveMessage(db, m); err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			os.Exit(1)
-		}
-	}
+	msgs := make(chan Message, 16)
+	var pending sync.WaitGroup // messages sent but not yet saved
+	saverDone := make(chan struct{})
+	go saveLoop(db, msgs, &pending, saverDone)
 
-	// show takes (msgs, err) directly, so it can wrap any query call.
-	show := func(msgs []Message, err error) {
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "  error:", err)
+	fmt.Printf("read %d messages from %s; alice, bob and carol are chatting...\n", count, *file)
+	var senders sync.WaitGroup
+	for _, u := range users {
+		senders.Add(1)
+		go func() {
+			defer senders.Done()
+			simulateUser(u, conversation[u], msgs, &pending)
+		}()
+	}
+	senders.Wait()
+	pending.Wait() // every message is now in the database
+
+	fmt.Println()
+	fmt.Println(help)
+	runCommands(db, msgs, &pending)
+
+	close(msgs) // tells saveLoop there is nothing more to save
+	<-saverDone
+	fmt.Println("bye")
+}
+
+// runCommands reads commands from standard input until "quit" or end of input.
+func runCommands(db *sql.DB, msgs chan<- Message, pending *sync.WaitGroup) {
+	in := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Print("> ")
+		if !in.Scan() {
 			return
 		}
-		for _, m := range msgs {
+		cmd, arg, _ := strings.Cut(strings.TrimSpace(in.Text()), " ")
+		arg = strings.TrimSpace(arg)
+
+		var results []Message
+		var err error
+		switch strings.ToLower(cmd) {
+		case "":
+			continue
+		case "quit", "exit":
+			return
+		case "help":
+			fmt.Println(help)
+			continue
+		case "history":
+			results, err = history(db)
+		case "user":
+			if !slices.Contains(users, arg) {
+				fmt.Println("usage: user <alice|bob|carol>")
+				continue
+			}
+			results, err = filterByUser(db, arg)
+		case "search":
+			if arg == "" {
+				fmt.Println("usage: search <word>")
+				continue
+			}
+			results, err = searchKeyword(db, arg)
+		case "send":
+			name, text, _ := strings.Cut(arg, " ")
+			text = strings.TrimSpace(text)
+			if !slices.Contains(users, name) || text == "" {
+				fmt.Println("usage: send <alice|bob|carol> <text>")
+				continue
+			}
+			send(msgs, pending, name, text)
+			pending.Wait() // wait for the saver so the next query includes it
+			continue
+		default:
+			fmt.Println("unknown command; type help")
+			continue
+		}
+
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			continue
+		}
+		if len(results) == 0 {
+			fmt.Println("  (no messages)")
+		}
+		for _, m := range results {
 			fmt.Println(" ", m)
 		}
 	}
-	fmt.Println("history:")
-	show(history(db))
-	fmt.Println("filter by user bob:")
-	show(filterByUser(db, "bob"))
-	fmt.Println(`search "lunch":`)
-	show(searchKeyword(db, "lunch"))
 }
