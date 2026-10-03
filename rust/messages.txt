@@ -1,0 +1,109 @@
+# Sample conversation for the chat app.
+# One message per line, written as  user: message
+# The program reads this file at startup. Each user gets a thread and
+# sends their own lines in the order they appear here.
+# Lines that are empty or start with # are ignored.
+# A line with a user and no message (see "bob:" below) is sent as an empty
+# message on purpose, so the demo shows the database rejecting it.
+
+alice: hey everyone, are we still on for rust tonight?
+bob: yep, I'll be there
+carol: reminder: demo freeze is tonight
+alice: I finished the database functions this morning
+bob: the go version is almost done too
+carol: slides are due before the demo
+alice: can someone test the search command?
+bob:
+carol: I can test the filter command
+alice: search is working on my machine
+bob: I will test search after lunch
+carol: filter works for all three users
+alice: did anyone push to the repository yet?
+bob: I pushed the go folder an hour ago
+carol: I pulled it and the build passed
+alice: the handler thread owns the database connection
+bob: in go we share one database handle
+carol: that difference should go in the report
+alice: rust would not compile until I fixed ownership
+bob: go compiled the first time for me
+carol: the compiler errors are good examples for the slides
+alice: how many messages should the demo send?
+bob: around one hundred sounds right
+carol: one hundred is enough to show the history
+alice: each user runs on a separate thread
+bob: each user is a goroutine on our side
+carol: both use a channel to pass messages
+alice: the channel closes when every sender is dropped
+bob: we have to close the channel ourselves in go
+carol: nice, that is another difference to mention
+alice: timestamps come from the database
+bob: same in go, sqlite fills in the time
+carol: are the timestamps in local time or utc?
+alice: they are utc in the rust version
+bob: we should use the same setting in both versions
+carol: agreed, keep the output identical
+alice: the error from the empty message shows up correctly
+bob: go returns the same error as a value
+carol: I will add both to the testing section
+alice: who is writing the comparison section?
+bob: I can draft the concurrency part
+carol: I will take error handling and memory
+alice: then I will write the part about structs and enums
+bob: do we need a performance number?
+carol: yes, the assignment asks about go performance
+alice: we could time how long one hundred messages take
+bob: I will add a timer to the go version
+carol: send me the number when you have it
+alice: the search matched part of a word earlier
+bob: ours had the same bug
+carol: is that fixed in both versions now?
+alice: fixed in rust, it matches whole words now
+bob: I will fix go after lunch
+carol: please test with the word is
+alice: lunch break, back in thirty minutes
+bob: same here
+carol: I will keep working on the slides
+alice: back, did anything change?
+bob: I pushed the search fix for go
+carol: slides have the diagram of the channel now
+alice: the diagram looks clear
+bob: can we add the reply channel to it?
+carol: sure, I will add a second picture
+alice: the reply channel is how a query gets its answer
+bob: that part took me a while to understand
+carol: the picture should help with that
+alice: should we show the error message in the demo?
+bob: yes, it proves the result is handled
+carol: I will add a slide for it
+alice: which commands will we run live?
+bob: history, then filter, then search
+carol: and quit at the end to show a clean exit
+alice: I added a help command for the demo
+bob: good idea, I will add one to go
+carol: marking that item as finished
+alice: what is left on the list?
+bob: the timer and the readme
+carol: and the presentation order
+alice: I will update the readme for rust
+bob: I will do the same for go
+carol: I will present the overview first
+alice: who presents the rust walkthrough?
+bob: you two should, you wrote it
+carol: then the go pair presents right after
+alice: sounds fair
+bob: how long is each part?
+carol: about three minutes per section
+alice: I will practice the ownership explanation
+bob: I will practice goroutines and channels
+carol: I will time the whole run tonight
+alice: last test run passed on my side
+bob: go passed with the race detector on
+carol: great, no bugs left on the list
+alice: final commit is pushed
+bob: mine too
+carol: freezing the code now
+alice: thanks everyone, this was a good team effort
+bob: rust was harder than go for me
+carol: good work everyone, see you tonight
+alice: see you all at 7
+bob: see you at 7

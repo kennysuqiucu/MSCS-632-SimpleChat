@@ -10,6 +10,7 @@ mod db;
 
 use db::{filter_by_user, history, init_db, save_message, search_by_keyword, Message};
 use rusqlite::{Connection, Result};
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::sync::mpsc;
 use std::thread;
@@ -86,17 +87,70 @@ fn run_handler(rx: mpsc::Receiver<Command>) {
     }
 }
 
+/// The text file that holds the sample conversation.
+const MESSAGES_FILE: &str = "messages.txt";
+
+/// How long a user waits after each message, in milliseconds.
+const PAUSE_MS: u64 = 50;
+
+/// One user and the messages they will send, in order. A message of `None`
+/// stands for an empty line in the file.
+type UserScript = (String, Vec<Option<String>>);
+
+/// Reads the sample conversation from a text file and groups the lines by
+/// user. Each line looks like `alice: hello`. Empty lines and lines starting
+/// with `#` are skipped.
+///
+/// Reading a file can fail (for example, the file is missing), so this
+/// returns an `io::Result` and lets `main` decide what to tell the user.
+fn load_messages(path: &str) -> io::Result<Vec<UserScript>> {
+    let text = fs::read_to_string(path)?;
+    let mut users: Vec<UserScript> = Vec::new();
+
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        // Split at the first colon: the name is before it, the message after.
+        let (user_id, message) = match line.split_once(':') {
+            Some((user_id, message)) => (user_id.trim(), message.trim()),
+            None => {
+                println!("skipping a line with no user name: {}", line);
+                continue;
+            }
+        };
+
+        // A name with nothing after it becomes `None`. The database rejects
+        // it, which is how the demo shows an error being handled.
+        let message = if message.is_empty() {
+            None
+        } else {
+            Some(message.to_string())
+        };
+
+        // Add the message to this user's list, or start a list for a new user.
+        match users.iter_mut().find(|(name, _)| name == user_id) {
+            Some((_, messages)) => messages.push(message),
+            None => users.push((user_id.to_string(), vec![message])),
+        }
+    }
+
+    Ok(users)
+}
+
 /// One simulated user. It sends its messages one at a time and pauses after
 /// each, the way a person takes a moment between messages. The pause is what
-/// lets the three users take turns, so the chat reads as a conversation
-/// instead of one user finishing before the next one starts.
-fn simulate_user(tx: mpsc::Sender<Command>, user_id: &str, messages: Vec<Option<&str>>) {
+/// lets the users take turns, so the chat reads as a conversation instead of
+/// one user finishing before the next one starts.
+fn simulate_user(tx: mpsc::Sender<Command>, user_id: String, messages: Vec<Option<String>>) {
     for message in messages {
         let _ = tx.send(Command::Save {
-            user_id: user_id.to_string(),
-            message: message.map(str::to_string),
+            user_id: user_id.clone(),
+            message,
         });
-        thread::sleep(Duration::from_millis(300));
+        thread::sleep(Duration::from_millis(PAUSE_MS));
     }
 }
 
@@ -172,41 +226,21 @@ fn run_cli(tx: &mpsc::Sender<Command>) {
 }
 
 fn main() {
+    // Load the conversation first. If the file cannot be read there is
+    // nothing to send, so say why and stop.
+    let seed = match load_messages(MESSAGES_FILE) {
+        Ok(seed) => seed,
+        Err(e) => {
+            println!("Could not read {}: {}", MESSAGES_FILE, e);
+            println!("Run the program from the rust folder, where {} lives.", MESSAGES_FILE);
+            return;
+        }
+    };
+
     let (tx, rx) = mpsc::channel::<Command>();
     let handler = thread::spawn(move || run_handler(rx));
 
     println!("-- sending messages --");
-
-    let seed: Vec<(&str, Vec<Option<&str>>)> = vec![
-        (
-            "alice",
-            vec![
-                Some("hey everyone, are we still on for rust tonight?"),
-                Some("I finished the database functions this morning"),
-                Some("can someone test the search command?"),
-                Some("see you all at 7"),
-            ],
-        ),
-        (
-            "bob",
-            vec![
-                Some("yep, I'll be there"),
-                Some("the go version is almost done too"),
-                None, // deliberately bad: violates the NOT NULL message column
-                Some("I will test search after lunch"),
-                Some("rust was harder than go for me"),
-            ],
-        ),
-        (
-            "carol",
-            vec![
-                Some("reminder: demo freeze is tonight"),
-                Some("slides are due before the demo"),
-                Some("I can test the filter command"),
-                Some("good work everyone, see you tonight"),
-            ],
-        ),
-    ];
 
     let senders: Vec<_> = seed
         .into_iter()
