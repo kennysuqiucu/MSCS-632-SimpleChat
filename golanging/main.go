@@ -185,7 +185,7 @@ func saveLoop(db *sql.DB, in <-chan Message, pending *sync.WaitGroup, done chan<
 
 const help = `commands:
   history              show every message
-  user <name>          show only messages from alice, bob or carol
+  filter <name>        show only messages from alice, bob or carol
   search <word>        show only messages containing a word
   send <name> <text>   send a new message as alice, bob or carol
   help                 show this list
@@ -295,9 +295,9 @@ func runCommands(db *sql.DB, msgs chan<- Message, pending *sync.WaitGroup) {
 			continue
 		case "history":
 			results, err = history(db)
-		case "user":
+		case "filter", "user": // "filter" matches the Rust version; "user" still works
 			if !slices.Contains(users, arg) {
-				fmt.Println("usage: user <alice|bob|carol>")
+				fmt.Println("usage: filter <alice|bob|carol>")
 				continue
 			}
 			results, err = filterByUser(db, arg)
