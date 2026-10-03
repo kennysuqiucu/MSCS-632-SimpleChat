@@ -1,0 +1,7 @@
+# local database created by go run
+chat.db
+*.db
+
+# old versions and commit staging, not part of the project
+_old/
+_commits/
