@@ -88,8 +88,7 @@ fn run_handler(rx: mpsc::Receiver<Command>) {
 }
 
 /// The text file that holds the sample conversation.
-const MESSAGES_FILE: &str = "messages.txt";
-
+const MESSAGES_FILE: &str = "../messages.txt";
 /// How long a user waits after each message, in milliseconds.
 const PAUSE_MS: u64 = 50;
 
