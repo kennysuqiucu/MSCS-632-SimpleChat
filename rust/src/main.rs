@@ -60,7 +60,7 @@ enum Command {
 /// every save AND every query through one thread's connection sidesteps
 /// that entirely — there is never more than one writer, by construction.
 fn run_handler(rx: mpsc::Receiver<Command>) {
-    let conn = Connection::open_in_memory().expect("failed to open in-memory database");
+    let conn = Connection::open(DB_FILE).expect("failed to open the database file");
     init_db(&conn).expect("failed to create messages table");
 
     for cmd in rx {
@@ -86,6 +86,10 @@ fn run_handler(rx: mpsc::Receiver<Command>) {
         }
     }
 }
+
+/// The SQLite database file. It is created in the folder the program is
+/// started from, and it is still there after the program exits.
+const DB_FILE: &str = "chat.db";
 
 /// The text file that holds the sample conversation.
 const MESSAGES_FILE: &str = "../messages.txt";

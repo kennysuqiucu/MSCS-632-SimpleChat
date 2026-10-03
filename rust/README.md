@@ -12,7 +12,9 @@ no GUI.
 - Each user posts its messages into the shared room concurrently, on its
   own OS thread, with a short pause after each one so the users take turns.
 - Every message is saved to a SQLite `messages` table (`user_id`, `message`,
-  `sent_at`).
+  `sent_at`) in the database file `chat.db`. The file is created in the
+  `rust` folder and stays there after the program exits. Each run starts
+  with an empty table.
 - After the initial burst of messages, the program enters an interactive
   command loop and stays alive until you stop it:
   - `history` — show every saved message
@@ -38,7 +40,8 @@ The code is split into two files, one per task assignment:
 - `src/main.rs` (Sasha): the `Command` enum, the handler thread, the
   simulated user threads, `load_messages()` which reads the conversation
   file, and the interactive loop in `main()`/`run_cli()`.
-- `messages.txt`: the sample conversation.
+- `../messages.txt`: the sample conversation, shared with the Go version.
+- `chat.db`: the database file, created at run time and ignored by git.
 
 `main.rs` pulls in the database code with `mod db;`.
 
@@ -72,8 +75,9 @@ Requires Rust (stable) via [rustup](https://rustup.rs/) and a C compiler
 cargo run --quiet
 ```
 
-Run it from this `rust` folder, because the program looks for
-`messages.txt` in the folder it is started from.
+Run it from this `rust` folder. The program reads `../messages.txt` (the
+conversation file at the top of the repository, shared with the Go version)
+and creates `chat.db` in the folder it is started from.
 
 ## Dependencies
 
