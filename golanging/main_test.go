@@ -2,7 +2,9 @@ package main
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -119,3 +121,100 @@ func TestFreshAndKeep(t *testing.T) {
 	}
 }
 
+func TestLoadConversation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "conv.txt")
+	content := "# comment\n\nalice: hi: there\n  bob:   hello  \ncarol: one\nbob:\nalice: two\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, count, err := loadConversation(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 5 {
+		t.Errorf("count = %d, want 5", count)
+	}
+	want := map[string][]string{
+		"alice": {"hi: there", "two"}, // only the first ":" splits user from text
+		"bob":   {"hello", ""},        // "bob:" is kept as an empty message
+		"carol": {"one"},
+	}
+	for u, w := range want {
+		if !equal(got[u], w) {
+			t.Errorf("%s: got %q, want %q", u, got[u], w)
+		}
+	}
+
+	for name, bad := range map[string]string{
+		"no colon":     "alice hello\n",
+		"unknown user": "dave: hi\n",
+	} {
+		os.WriteFile(path, []byte(bad), 0o644)
+		if _, _, err := loadConversation(path); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+	if _, _, err := loadConversation(filepath.Join(t.TempDir(), "missing.txt")); err == nil {
+		t.Error("missing file: expected an error")
+	}
+}
+
+// TestSampleConversation checks the shared messages.txt in the repo root:
+// every line except bob's empty one is saved.
+func TestSampleConversation(t *testing.T) {
+	conv, count, err := loadConversation("../messages.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := testDB(t)
+	for _, u := range users {
+		for _, text := range conv[u] {
+			saveMessage(db, Message{UserID: u, Text: text, SentAt: time.Now()}) // empty one fails on purpose
+		}
+	}
+	all, err := history(db)
+	if err != nil || len(all) != count-1 {
+		t.Fatalf("saved %d of %d messages, want %d (err=%v)", len(all), count, count-1, err)
+	}
+}
+
+// scripts is a small conversation used by the concurrency test.
+var scripts = map[string][]string{
+	"alice": {"Good morning everyone!", "Anyone up for lunch today?", "The build is green again"},
+	"bob":   {"Morning alice", "Lunch sounds good to me", "I pushed a fix for the login bug"},
+	"carol": {"Hi all", "Count me in for lunch", "Who is reviewing my pull request?"},
+}
+
+// TestConcurrentUsers runs the real pipeline: user goroutines -> channel ->
+// one saver goroutine -> SQLite.
+func TestConcurrentUsers(t *testing.T) {
+	db := testDB(t)
+	msgs := make(chan Message)
+	var pending sync.WaitGroup
+	done := make(chan struct{})
+	go saveLoop(db, msgs, &pending, done)
+
+	var senders sync.WaitGroup
+	for _, u := range users {
+		senders.Add(1)
+		go func() {
+			defer senders.Done()
+			simulateUser(u, scripts[u], msgs, &pending)
+		}()
+	}
+	senders.Wait()
+	pending.Wait()
+
+	for _, u := range users {
+		got, err := filterByUser(db, u)
+		if err != nil || len(got) != len(scripts[u]) {
+			t.Fatalf("%s: got %d msgs, want %d (err=%v)", u, len(got), len(scripts[u]), err)
+		}
+		// Each user's own messages stay in the order that user sent them.
+		if !equal(texts(t, got, nil), scripts[u]) {
+			t.Errorf("%s: order changed: %q", u, texts(t, got, nil))
+		}
+	}
+	close(msgs)
+	<-done
+}
