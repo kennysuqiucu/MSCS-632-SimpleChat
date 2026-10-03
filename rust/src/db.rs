@@ -27,10 +27,15 @@ fn row_to_message(row: &Row) -> Result<Message> {
     })
 }
 
-/// Creates the `messages` table if it does not exist yet.
+/// Makes an empty `messages` table.
+///
+/// The database is a file, so a table from an earlier run may still be in
+/// it. That table is dropped first, which means every run starts with an
+/// empty history and the ids start again at 1.
 pub fn init_db(conn: &Connection) -> Result<()> {
+    conn.execute("DROP TABLE IF EXISTS messages", [])?;
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS messages (
+        "CREATE TABLE messages (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id   TEXT NOT NULL,
             message   TEXT NOT NULL,
