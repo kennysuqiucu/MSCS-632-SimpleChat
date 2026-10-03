@@ -18,22 +18,25 @@ The same small chat application is built twice, once in **Go** and once in **Rus
 ```
 MSCS-632-SimpleChat/
 ├── README.md           this file
-├── messages.txt        sample conversation, read by the Go version
+├── messages.txt        sample conversation, shared by both versions
 ├── .gitignore          keeps local *.db files out of git
 ├── golanging/          Go version
 │   ├── main.go         the whole program (one source file)
 │   ├── main_test.go    tests
 │   ├── go.mod
-│   └── go.sum
+│   ├── go.sum
+│   └── chat.db         created when the program runs (not in git)
 └── rust/               Rust version
     ├── README.md       Rust-specific notes
-    ├── messages.txt    sample conversation, read by the Rust version (same content)
     ├── Cargo.toml
     ├── Cargo.lock
-    └── src/
-        ├── db.rs       Message struct and database functions
-        └── main.rs     threads, channel and command loop
+    ├── src/
+    │   ├── db.rs       Message struct and database functions
+    │   └── main.rs     threads, channel and command loop
+    └── chat.db         created when the program runs (not in git)
 ```
+
+Both programs look for `../messages.txt` and create `chat.db` relative to the folder they're started from. Always run them from inside their own folder (`golanging` or `rust`). Running from the repo root doesn't work.
 
 ## Running the programs
 
@@ -56,17 +59,15 @@ Requires **Rust (stable)** from [rustup](https://rustup.rs/) and a **C compiler*
 
 ```
 cd rust
-cargo run --quiet          # reads messages.txt in the rust folder
+cargo run --quiet          # reads ../messages.txt, starts a fresh chat.db, then the command loop
 ```
-
-Run it from inside `rust`, since that's where it looks for `messages.txt`.
 
 ## What both versions do
 
-1. Read the conversation file: one `user: message` per line. Empty lines and lines starting with `#` are skipped, and only the first `:` separates the name from the text.
+1. Read the shared conversation file, `messages.txt` in the repo root: one `user: message` per line. Empty lines and lines starting with `#` are skipped, and only the first `:` separates the name from the text.
 2. Start one concurrent sender per user (a goroutine in Go, an OS thread in Rust). Each sends its own lines in file order, so different users' messages interleave differently on every run.
 3. Send every message through a channel to **one** worker that owns the database writes, so SQLite never sees two writers at once and never reports "database is locked".
-4. Save each message with the sender's user ID and a timestamp.
+4. Save each message with the sender's user ID and a timestamp to a SQLite file, `chat.db`. Each run drops and recreates the `messages` table, so the history starts empty and IDs start at 1.
 5. Deliberately fail on bob's empty line (`bob:`), so the demo shows a database error being handled.
 6. Open an interactive command loop for history, filter-by-user and keyword search.
 
@@ -92,9 +93,8 @@ The sample has 101 lines. 100 are saved, and `bob:` is rejected on purpose.
 | Action | Go | Rust |
 |---|---|---|
 | Show every message | `history` | `history` |
-| Messages from one user | `user <name>` | `filter <name>` |
+| Messages from one user | `filter <name>` | `filter <name>` |
 | Messages containing a word | `search <word>` | `search <word>` |
-| Send a new message | `send <name> <text>` | — |
 | List commands | `help` | `help` |
 | Exit | `quit` / `exit` | `quit` / `exit` (Ctrl+C also works) |
 
@@ -122,7 +122,7 @@ The sample has 101 lines. 100 are saved, and `bob:` is rejected on purpose.
 - The handler thread **owns the only `Connection`**, and every save **and** every query goes through it. `rusqlite::Connection` isn't `Sync`, so the compiler won't let threads share it. Queries carry a one-shot reply channel so the command loop can wait for the answer.
 - The channel closes by itself once every `Sender` is dropped. `main` also sends `Command::Shutdown`.
 - bob's empty line is sent as `None`, which becomes SQL `NULL` and breaks the `NOT NULL` rule.
-- The database is in memory (`Connection::open_in_memory`), so nothing is left on disk after the program exits.
+- The database is the file `chat.db` (`Connection::open(DB_FILE)`). `init_db` drops and recreates the table on every run.
 
 ## Differences between the two versions
 
@@ -132,16 +132,16 @@ These are worth knowing for the demo, and some are good material for the compari
 |---|---|---|
 | Source files | 1 (`main.go`) | 2 (`db.rs`, `main.rs`) |
 | SQLite library | `database/sql` + `modernc.org/sqlite` (no C compiler) | `rusqlite` with `bundled` (needs a C compiler) |
-| Where data is stored | file `chat.db` | in memory |
+| Database file | `golanging/chat.db` | `rust/chat.db` |
+| Keep history between runs | yes, with `-keep` | no, always starts empty |
+| If `chat.db` can't be opened | prints the error and exits | the handler thread panics (`.expect`) |
 | Who runs queries | any goroutine, through the shared `*sql.DB` | only the handler thread, through reply channels |
-| `sent_at` | set by the sender (`time.Now()`), stored as RFC 3339 UTC | set by SQLite (`DEFAULT strftime(...)`), UTC |
-| Keyword search | substring, ignores case (`search is` also matches "this") | **whole words**, ignores case (`search is` doesn't match "this") |
+| `sent_at` | set by the sender (`time.Now()`), stored in UTC, **shown in local time** | set by SQLite (`DEFAULT strftime(...)`), **shown in UTC** |
+| Keyword search | substring, ignores case (`search is` also matches "this"); phrases like `search after lunch` work | **whole words**, ignores case (`search is` doesn't match "this"); a phrase never matches |
 | Empty message rejected by | `CHECK (message <> '')` | `NOT NULL` (sent as `NULL`) |
-| Filter command name | `user <name>` | `filter <name>` |
 | Unknown user or a line without `:` | stops with the line number | line without `:` is skipped; any user name is accepted |
 | Delay between messages | random 0–50 ms before each | fixed 50 ms after each |
 | Output line | `[15:04:05.000] #12 bob: text` | `[2026-10-03 15:04:05.123] bob: text` |
-| Conversation file | `../messages.txt` (repo root) | `rust/messages.txt` |
 | Automated tests | 6 (`go test -v .`) | none yet |
 
 ## Language comparison notes
