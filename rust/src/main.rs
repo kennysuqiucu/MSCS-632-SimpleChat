@@ -176,7 +176,10 @@ fn print_help() {
     );
 }
 
+/// Prints a one-line reminder of how to get help, then the `> ` prompt.
+/// It runs before every command, so the user never faces a bare prompt.
 fn print_prompt() {
+    println!("\nType 'help' for commands, 'quit' to stop.");
     print!("> ");
     let _ = io::stdout().flush();
 }
@@ -262,7 +265,7 @@ fn main() {
     // "saved:" lines are printed before the prompt appears.
     let _ = query_blocking(&tx, |reply| Command::History { reply });
 
-    println!("\nInitial messages sent. Type 'help' for commands, 'quit' to stop.");
+    println!("\nInitial messages sent.");
     run_cli(&tx);
 
     let _ = tx.send(Command::Shutdown);
