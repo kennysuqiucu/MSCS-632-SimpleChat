@@ -69,7 +69,7 @@ cargo run --quiet          # reads ../messages.txt, starts a fresh chat.db, then
 3. Send every message through a channel to **one** worker that owns the database writes, so SQLite never sees two writers at once and never reports "database is locked".
 4. Save each message with the sender's user ID and a timestamp to a SQLite file, `chat.db`. Each run drops and recreates the `messages` table, so the history starts empty and IDs start at 1.
 5. Deliberately fail on bob's empty line (`bob:`), so the demo shows a database error being handled.
-6. Open an interactive command loop for history, filter-by-user and keyword search.
+6. Open an interactive command loop for history, filter-by-user and keyword search. Search matches **whole words** and ignores case: `search is` finds "freeze is tonight" but not "this" or "finished". It searches for one word, so a phrase like `search after lunch` finds nothing.
 
 ```
 alice ─┐
@@ -137,12 +137,11 @@ These are worth knowing for the demo, and some are good material for the compari
 | If `chat.db` can't be opened | prints the error and exits | the handler thread panics (`.expect`) |
 | Who runs queries | any goroutine, through the shared `*sql.DB` | only the handler thread, through reply channels |
 | `sent_at` | set by the sender (`time.Now()`), stored in UTC, **shown in local time** | set by SQLite (`DEFAULT strftime(...)`), **shown in UTC** |
-| Keyword search | substring, ignores case (`search is` also matches "this"); phrases like `search after lunch` work | **whole words**, ignores case (`search is` doesn't match "this"); a phrase never matches |
 | Empty message rejected by | `CHECK (message <> '')` | `NOT NULL` (sent as `NULL`) |
 | Unknown user or a line without `:` | stops with the line number | line without `:` is skipped; any user name is accepted |
 | Delay between messages | random 0–50 ms before each | fixed 50 ms after each |
 | Output line | `[15:04:05.000] #12 bob: text` | `[2026-10-03 15:04:05.123] bob: text` |
-| Automated tests | 6 (`go test -v .`) | none yet |
+| Automated tests | 7 (`go test -v .`) | none yet |
 
 ## Language comparison notes
 
