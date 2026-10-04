@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, registers itself as "sqlite"
 )
@@ -104,14 +105,42 @@ func filterByUser(db *sql.DB, userID string) ([]Message, error) {
 		userID)
 }
 
-// searchKeyword returns messages whose text contains keyword (ignoring case).
+// searchKeyword returns messages that contain keyword as a whole word (ignoring case).
+//
+// It matches whole words only, the same as the Rust version: searching for
+// "is" finds "freeze is tonight" but not "finished" or "this". The SQL LIKE
+// first picks every message containing the letters anywhere, then hasWord
+// keeps only the messages where those letters are a word on their own.
 func searchKeyword(db *sql.DB, keyword string) ([]Message, error) {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
 	// Escape LIKE wildcards so a search for "50%" means the text "50%".
 	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(keyword)
-	return queryMessages(db,
+	candidates, err := queryMessages(db,
 		`SELECT id, user_id, message, sent_at FROM messages
 		 WHERE message LIKE '%' || ? || '%' ESCAPE '\' ORDER BY id`,
 		escaped)
+	if err != nil {
+		return nil, err
+	}
+
+	var matches []Message
+	for _, m := range candidates {
+		if hasWord(m.Text, keyword) {
+			matches = append(matches, m)
+		}
+	}
+	return matches, nil
+}
+
+// hasWord reports whether one of the words in text is exactly keyword
+// (keyword must already be lower case). The text is split wherever a
+// character is not a letter, a digit or an apostrophe, so "tonight?" is read
+// as the word "tonight".
+func hasWord(text, keyword string) bool {
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
+	})
+	return slices.Contains(words, keyword)
 }
 
 // queryMessages runs a SELECT and turns each row into a Message.

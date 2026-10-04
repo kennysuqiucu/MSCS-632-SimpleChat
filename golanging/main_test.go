@@ -78,13 +78,37 @@ func TestSaveAndQuery(t *testing.T) {
 		{"filter bob", txt(filterByUser(db, "bob")), []string{"lunch sounds good"}},
 		{"filter unknown", txt(filterByUser(db, "dave")), []string{}},
 		{"keyword ignores case", txt(searchKeyword(db, "LUNCH")), []string{"Lunch today?", "lunch sounds good"}},
-		{"% is literal", txt(searchKeyword(db, "100%")), []string{"100% done, see my_branch"}},
-		{"_ is literal", txt(searchKeyword(db, "y_b")), []string{"100% done, see my_branch"}},
+		{"part of a word does not match", txt(searchKeyword(db, "lunc")), []string{}},
+		{"punctuation is not part of a word", txt(searchKeyword(db, "today")), []string{"Lunch today?"}},
+		{"% and _ split words", txt(searchKeyword(db, "branch")), []string{"100% done, see my_branch"}},
+		{"% is not a wildcard", txt(searchKeyword(db, "%")), []string{}},
 		{"no match", txt(searchKeyword(db, "pizza")), []string{}},
 	}
 	for _, c := range cases {
 		if !equal(c.got, c.want) {
 			t.Errorf("%s: got %q, want %q", c.name, c.got, c.want)
+		}
+	}
+}
+
+// TestSearchWholeWords mirrors the demo: "search is" must not match "this" or "finished".
+func TestSearchWholeWords(t *testing.T) {
+	db := testDB(t)
+	mustSave(t, db, "carol", "reminder: demo freeze is tonight")
+	mustSave(t, db, "alice", "I finished the database functions this morning")
+	mustSave(t, db, "alice", "what is left on the list?")
+	mustSave(t, db, "bob", "yep, I'll be there")
+	cases := map[string][]string{
+		"is":   {"reminder: demo freeze is tonight", "what is left on the list?"},
+		"IS":   {"reminder: demo freeze is tonight", "what is left on the list?"},
+		"list": {"what is left on the list?"},
+		"i'll": {"yep, I'll be there"},
+		"ill":  {},
+	}
+	for kw, want := range cases {
+		got, err := searchKeyword(db, kw)
+		if !equal(texts(t, got, err), want) {
+			t.Errorf("search %q: got %q, want %q", kw, texts(t, got, err), want)
 		}
 	}
 }
