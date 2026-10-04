@@ -31,14 +31,14 @@ import (
 // Message is one chat message. It maps directly onto a row of the messages
 // table: id, user_id, message, sent_at.
 type Message struct {
-	ID     int64 // assigned by the database when the message is saved
-	UserID string
-	Text   string
-	SentAt time.Time
+	ID      int64 // assigned by the database when the message is saved
+	UserID  string
+	Message string
+	SentAt  time.Time
 }
 
 func (m Message) String() string {
-	return fmt.Sprintf("[%s] #%d %s: %s", m.SentAt.Format("15:04:05.000"), m.ID, m.UserID, m.Text)
+	return fmt.Sprintf("[%s] #%d %s: %s", m.SentAt.Format("15:04:05.000"), m.ID, m.UserID, m.Message)
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ func openDB(path string, fresh bool) (*sql.DB, error) {
 func saveMessage(db *sql.DB, m Message) (int64, error) {
 	res, err := db.Exec(
 		`INSERT INTO messages (user_id, message, sent_at) VALUES (?, ?, ?)`,
-		m.UserID, m.Text, m.SentAt.UTC().Format(time.RFC3339Nano))
+		m.UserID, m.Message, m.SentAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, fmt.Errorf("save message: %w", err)
 	}
@@ -125,7 +125,7 @@ func searchKeyword(db *sql.DB, keyword string) ([]Message, error) {
 
 	var matches []Message
 	for _, m := range candidates {
-		if hasWord(m.Text, keyword) {
+		if hasWord(m.Message, keyword) {
 			matches = append(matches, m)
 		}
 	}
@@ -155,7 +155,7 @@ func queryMessages(db *sql.DB, query string, args ...any) ([]Message, error) {
 	for rows.Next() {
 		var m Message
 		var sentAt string
-		if err := rows.Scan(&m.ID, &m.UserID, &m.Text, &sentAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.UserID, &m.Message, &sentAt); err != nil {
 			return nil, fmt.Errorf("read row: %w", err)
 		}
 		if m.SentAt, err = time.Parse(time.RFC3339Nano, sentAt); err != nil {
@@ -190,7 +190,7 @@ func simulateUser(userID string, lines []string, out chan<- Message, pending *sy
 // pending is marked done by the saver once the message is in the database.
 func send(out chan<- Message, pending *sync.WaitGroup, userID, text string) {
 	pending.Add(1)
-	out <- Message{UserID: userID, Text: text, SentAt: time.Now()}
+	out <- Message{UserID: userID, Message: text, SentAt: time.Now()}
 }
 
 // saveLoop is the only goroutine that writes to the database. It receives

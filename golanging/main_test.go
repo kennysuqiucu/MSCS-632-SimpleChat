@@ -21,7 +21,7 @@ func testDB(t *testing.T) *sql.DB {
 
 func mustSave(t *testing.T, db *sql.DB, user, text string) {
 	t.Helper()
-	if _, err := saveMessage(db, Message{UserID: user, Text: text, SentAt: time.Now()}); err != nil {
+	if _, err := saveMessage(db, Message{UserID: user, Message: text, SentAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -33,7 +33,7 @@ func texts(t *testing.T, msgs []Message, err error) []string {
 	}
 	out := []string{}
 	for _, m := range msgs {
-		out = append(out, m.Text)
+		out = append(out, m.Message)
 	}
 	return out
 }
@@ -53,7 +53,7 @@ func equal(a, b []string) bool {
 func TestSaveAndQuery(t *testing.T) {
 	db := testDB(t)
 	sentAt := time.Date(2026, 10, 3, 14, 5, 9, 123456789, time.Local)
-	id, err := saveMessage(db, Message{UserID: "alice", Text: "Lunch today?", SentAt: sentAt})
+	id, err := saveMessage(db, Message{UserID: "alice", Message: "Lunch today?", SentAt: sentAt})
 	if err != nil || id != 1 {
 		t.Fatalf("id=%d err=%v", id, err)
 	}
@@ -115,7 +115,7 @@ func TestSearchWholeWords(t *testing.T) {
 
 func TestDatabaseRejectsEmptyMessage(t *testing.T) {
 	db := testDB(t)
-	if _, err := saveMessage(db, Message{UserID: "bob", Text: "", SentAt: time.Now()}); err == nil {
+	if _, err := saveMessage(db, Message{UserID: "bob", Message: "", SentAt: time.Now()}); err == nil {
 		t.Fatal("empty message was saved; the CHECK constraint should reject it")
 	}
 	if all, err := history(db); err != nil || len(all) != 0 {
@@ -193,7 +193,7 @@ func TestSampleConversation(t *testing.T) {
 	db := testDB(t)
 	for _, u := range users {
 		for _, text := range conv[u] {
-			saveMessage(db, Message{UserID: u, Text: text, SentAt: time.Now()}) // empty one fails on purpose
+			saveMessage(db, Message{UserID: u, Message: text, SentAt: time.Now()}) // empty one fails on purpose
 		}
 	}
 	all, err := history(db)
